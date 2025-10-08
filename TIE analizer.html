@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analizador de Información Estructural (TIE) - por Raúl Vázquez</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #121212;
+            color: #e0e0e0;
+            margin: 0;
+            padding: 2em;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .container {
+            width: 90%;
+            max-width: 1200px;
+            background-color: #1e1e1e;
+            padding: 2em;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        }
+        h1, h2 {
+            text-align: center;
+            color: #4db8ff;
+            border-bottom: 2px solid #4db8ff;
+            padding-bottom: 10px;
+        }
+        input[type="file"] {
+            display: block;
+            margin: 2em auto;
+            padding: 12px;
+            border: 2px dashed #555;
+            background-color: #2a2a2a;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            color: #e0e0e0;
+            width: 80%;
+            max-width: 400px;
+        }
+        input[type="file"]:hover {
+            border-color: #4db8ff;
+            background-color: #333;
+        }
+        #chart-container {
+            position: relative;
+            height: 60vh;
+            width: 100%;
+            margin-top: 1em;
+        }
+        #results {
+            margin-top: 2em;
+            background-color: #2a2a2a;
+            padding: 1.5em;
+            border-radius: 5px;
+            border-left: 5px solid #4db8ff;
+        }
+        #results h2 {
+            margin-top: 0;
+            color: #e0e0e0;
+            border: none;
+            text-align: left;
+        }
+        p {
+            line-height: 1.6;
+        }
+        strong {
+            color: #4db8ff;
+        }
+        #loader {
+            display: none;
+            text-align: center;
+            font-size: 1.5em;
+            padding: 1em;
+            color: #4db8ff;
+        }
+        details {
+            margin-bottom: 1em;
+            background-color: #333;
+            padding: 1em;
+            border-radius: 5px;
+            border: 1px solid #444;
+        }
+        summary {
+            cursor: pointer;
+            font-weight: bold;
+            color: #4db8ff;
+        }
+        small {
+            color: #aaa;
+            font-style: italic;
+        }
+        hr {
+            border: none;
+            border-top: 1px solid #444;
+            margin: 1.5em 0;
+        }
+        .file-info {
+            text-align: center;
+            margin-bottom: 1em;
+        }
+        .conclusion {
+            background: linear-gradient(135deg, #1a2a3a, #2a3a4a);
+            padding: 1.5em;
+            border-radius: 8px;
+            border: 1px solid #4db8ff;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Analizador de Información Estructural (TIE)</h1>
+        <p style="text-align:center;">Una herramienta para visualizar la estructura interna de los datos según la teoría de Raúl Vázquez.</p>
+
+        <div class="file-info">
+            <label for="file-upload">Sube un archivo para analizar sus Mapas de Presencia por Nibble:</label>
+            <input type="file" id="file-upload">
+        </div>
+
+        <div id="loader">Analizando archivo... Por favor, espera.</div>
+        
+        <div id="chart-container">
+            <canvas id="trajectory-chart"></canvas>
+        </div>
+
+        <div id="results">
+            <h2>Resultados del Análisis Estructural</h2>
+            <div id="metrics">
+                <p>Por favor, carga un archivo para ver los resultados.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('file-upload').addEventListener('change', handleFileSelect, false);
+
+        let trajectoryChart = null;
+
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const loader = document.getElementById('loader');
+            const chartContainer = document.getElementById('chart-container');
+            const metricsDiv = document.getElementById('metrics');
+
+            loader.style.display = 'block';
+            chartContainer.style.display = 'none';
+            metricsDiv.innerHTML = '<p>Procesando...</p>';
+
+            const reader = new FileReader();
+            const isTextFile = file.name.toLowerCase().endsWith('.txt') || file.name.toLowerCase().endsWith('.csv');
+
+            reader.onload = e => {
+                const fileContent = e.target.result;
+                let symbolStream;
+                let analysisType;
+
+                try {
+                    if (isTextFile) {
+                        // Lógica para archivos de texto
+                        analysisType = "Dígitos";
+                        symbolStream = [];
+                        // Recorremos cada caracter del contenido del archivo
+                        for (const char of fileContent) {
+                            // Convertimos el caracter a un número entero
+                            const digit = parseInt(char, 10);
+                            // Si el caracter es un dígito válido (0-9), lo añadimos a nuestra secuencia
+                            if (!isNaN(digit) && digit >= 0 && digit <= 9) {
+                                symbolStream.push(digit);
+                            }
+                        }
+
+                        if (symbolStream.length === 0) {
+                            throw new Error("El archivo de texto no contiene ningún dígito numérico (0-9).");
+                        }
+                    } else {
+                        // El análisis de archivos binarios como nibbles
+                        analysisType = "Nibbles";
+                        const byteArray = new Uint8Array(fileContent);
+                        symbolStream = [];
+                        for (let i = 0; i < byteArray.length; i++) {
+                            symbolStream.push(byteArray[i] >> 4); // Nibble alto
+                            symbolStream.push(byteArray[i] & 0x0F); // Nibble bajo
+                        }
+                    }
+
+                    setTimeout(() => {
+                        processAndVisualize(symbolStream, file.name, file.size, analysisType);
+                        loader.style.display = 'none';
+                        chartContainer.style.display = 'block';
+                    }, 50);
+
+                } catch (error) {
+                    loader.style.display = 'none';
+                    metricsDiv.innerHTML = `<p style="color: #ff8a80;"><strong>Error:</strong> ${error.message}</p>`;
+                    alert(error.message);
+                }
+            };
+
+            if (isTextFile) {
+                reader.readAsText(file);
+            } else {
+                reader.readAsArrayBuffer(file);
+            }
+        }
+
+        function processAndVisualize(symbolStream, fileName, fileSize, analysisType) {
+            // Identificar el alfabeto de símbolos únicos y crear un mapa de traducción.
+            const uniqueSymbols = [...new Set(symbolStream)].sort((a, b) => a - b);
+            const symbolToIndexMap = new Map(uniqueSymbols.map((symbol, index) => [symbol, index]));
+            const alphabetSize = uniqueSymbols.length;
+
+            // Crear Mapas de Presencia usando el mapa de traducción.
+            const presenceMaps = Array.from({ length: alphabetSize }, () => []);
+            for (let i = 0; i < symbolStream.length; i++) {
+                const symbol = symbolStream[i];
+                const index = symbolToIndexMap.get(symbol);
+                if (index !== undefined) {
+                    presenceMaps[index].push(i);
+                }
+            }
+
+            // Preparar datos para la gráfica (Trayectorias)
+            const datasets = [];
+            let maxOccurrences = 0;
+            
+            presenceMaps.forEach((map, index) => {
+                if (map.length > 0) {
+                    const originalSymbol = uniqueSymbols[index];
+                    const trajectoryData = map.map((position, idx) => ({ x: idx + 1, y: position }));
+                    if (trajectoryData.length > maxOccurrences) {
+                        maxOccurrences = trajectoryData.length;
+                    }
+                    datasets.push({
+                        label: `Símbolo ${originalSymbol}`,
+                        data: trajectoryData,
+                        borderColor: generateColor(index, alphabetSize),
+                        borderWidth: 1.5,
+                        pointRadius: 0,
+                        tension: 0.1,
+                        fill: false,
+                        hidden: map.length < 10
+                    });
+                }
+            });
+
+            const { lowerEnvelope, upperEnvelope, structuralArea, avgSpread, maxSpread } = calculateEnvelopes(datasets, maxOccurrences);
+
+            datasets.push({
+                label: 'Envoltura Inferior',
+                data: lowerEnvelope,
+                borderColor: 'rgba(100, 255, 100, 0.7)',
+                borderWidth: 2,
+                pointRadius: 0,
+                fill: '+1'
+            });
+            datasets.push({
+                label: 'Envoltura Superior',
+                data: upperEnvelope,
+                borderColor: 'rgba(255, 100, 100, 0.7)',
+                backgroundColor: 'rgba(75, 192, 192, 0.15)',
+                borderWidth: 2,
+                pointRadius: 0,
+                fill: false
+            });
+
+            const shannonStats = calculateShannonEntropy(symbolStream);
+            const advancedStats = calculateAdvancedStats(datasets, symbolStream.length, structuralArea, avgSpread, maxSpread);
+
+            renderChart(datasets, fileName, analysisType);
+            displayMetrics(fileSize, symbolStream.length, alphabetSize, shannonStats, advancedStats, analysisType);
+        }
+
+        function calculateEnvelopes(datasets, maxOccurrences) {
+            const lowerEnvelope = [], upperEnvelope = [];
+            let structuralArea = 0, avgSpread = 0, maxSpread = 0;
+            let validPoints = 0;
+
+            for (let x = 1; x <= maxOccurrences; x++) {
+                let minY = Infinity, maxY = -Infinity;
+                datasets.forEach(dataset => {
+                    if (dataset.data[x-1] && !dataset.label.includes('Envoltura')) {
+                        const y = dataset.data[x-1].y;
+                        if (y < minY) minY = y;
+                        if (y > maxY) maxY = y;
+                    }
+                });
+
+                if (minY !== Infinity && maxY !== -Infinity) {
+                    lowerEnvelope.push({ x, y: minY });
+                    upperEnvelope.push({ x, y: maxY });
+                    const spread = maxY - minY;
+                    structuralArea += spread;
+                    if (spread > maxSpread) maxSpread = spread;
+                    validPoints++;
+                }
+            }
+            avgSpread = validPoints > 0 ? structuralArea / validPoints : 0;
+            return { lowerEnvelope, upperEnvelope, structuralArea, avgSpread, maxSpread };
+        }
+
+        function calculateAdvancedStats(datasets, totalSymbols, structuralArea, avgSpread, maxSpread) {
+            const trajectories = datasets.filter(d => !d.label.includes('Envoltura') && d.data.length > 1);
+            let correlationSum = 0;
+            let correlationCount = 0;
+            for (let i = 0; i < trajectories.length; i++) {
+                for (let j = i + 1; j < trajectories.length; j++) {
+                    correlationSum += pearsonCorrelation(trajectories[i].data, trajectories[j].data);
+                    correlationCount++;
+                }
+            }
+            const avgCorrelation = correlationCount > 0 ? correlationSum / correlationCount : 0;
+
+            const stepSizes = trajectories.map(d => totalSymbols / d.data.length);
+            const alphabetSize = stepSizes.length;
+            const avgStepSize = alphabetSize > 0 ? stepSizes.reduce((a, b) => a + b, 0) / alphabetSize : 0;
+            const stdDevStepSize = alphabetSize > 0 ? Math.sqrt(stepSizes.map(x => Math.pow(x - avgStepSize, 2)).reduce((a, b) => a + b, 0) / alphabetSize) : 0;
+
+            const normalizedSpread = totalSymbols > 0 ? avgSpread / totalSymbols : 0;
+            const predictabilityIndex = (Math.abs(avgCorrelation) * (1 - normalizedSpread)) * 100;
+            
+            return {
+                structuralArea, avgSpread, maxSpread, avgCorrelation, avgStepSize,
+                stdDevStepSize, predictabilityIndex, alphabetSize
+            };
+        }
+
+        function displayMetrics(fileSize, totalSymbols, alphabetSize, shannonStats, advancedStats, analysisType) {
+            const { entropy } = shannonStats;
+            const { structuralArea, avgSpread, maxSpread, avgCorrelation, avgStepSize, stdDevStepSize, predictabilityIndex } = advancedStats;
+            const metricsDiv = document.getElementById('metrics');
+            
+            // Determinar el nivel de predictibilidad
+            let predictabilityLevel = "Muy Bajo";
+            let predictabilityColor = "#ff8a80";
+            
+            if (predictabilityIndex > 70) {
+                predictabilityLevel = "Muy Alto";
+                predictabilityColor = "#4db8ff";
+            } else if (predictabilityIndex > 50) {
+                predictabilityLevel = "Alto";
+                predictabilityColor = "#4db8ff";
+            } else if (predictabilityIndex > 30) {
+                predictabilityLevel = "Moderado";
+                predictabilityColor = "#ffcc80";
+            } else if (predictabilityIndex > 10) {
+                predictabilityLevel = "Bajo";
+                predictabilityColor = "#ffab91";
+            }
+            
+            metricsDiv.innerHTML = `
+                <h2>Resultados del Análisis Detallado</h2>
+                <details open>
+                    <summary><strong>Análisis General del Archivo</strong></summary>
+                    <p><strong>Tamaño Original:</strong> ${fileSize.toLocaleString()} bytes</p>
+                    <p><strong>Total de Símbolos (${analysisType}):</strong> ${totalSymbols.toLocaleString()}</p>
+                    <p><strong>Alfabeto Detectado:</strong> ${alphabetSize} símbolos únicos.</p>
+                </details>
+                <details>
+                    <summary><strong>Análisis de Entropía (Visión de Shannon)</strong></summary>
+                    <p><strong>Entropía de Shannon:</strong> ${entropy.toFixed(4)} bits/símbolo. (Máximo teórico: ${Math.log2(alphabetSize).toFixed(4)})</p>
+                    <small>Esta métrica mide la aleatoriedad estadística local. Un valor alto sugiere que es difícil predecir el *siguiente* símbolo. Ignora por completo la estructura global y geométrica.</small>
+                </details>
+                <details open>
+                    <summary><strong>Análisis Geométrico de Trayectorias (Visión de la TIE)</strong></summary>
+                    <p><strong>Área Estructural Total:</strong> ${Math.round(structuralArea).toLocaleString()}.
+                    <br><small>Mide el 'volumen' total que ocupan todas las trayectorias.</small></p>
+                    <p><strong>Dispersión Promedio del Haz:</strong> ${avgSpread.toFixed(2)} posiciones.
+                    <br><small>En promedio, ¿cuán separadas están las trayectorias? Mide la 'estrechez' del haz. <strong>Un valor bajo es un fuerte indicador de orden.</strong></small></p>
+                    <p><strong>Dispersión Máxima del Haz:</strong> ${Math.round(maxSpread)} posiciones.
+                    <br><small>Muestra el punto de máxima incertidumbre o 'caos' geométrico.</small></p>
+                </details>
+                <details open>
+                    <summary><strong>Análisis Relacional y de Comportamiento (Visión de la TIE)</strong></summary>
+                    <p><strong>Correlación Promedio de Trayectorias:</strong> <strong>${(avgCorrelation * 100).toFixed(2)}%</strong>
+                    <br><small>¡Métrica clave! Mide qué tan 'sincronizadas' están las trayectorias entre sí. Un valor cercano a ±100% significa alta correlación (se mueven 'en formación'), cercano a 0% significa aleatoriedad.</small></p>
+                    <p><strong>Paso Promedio de Símbolo:</strong> ${avgStepSize.toFixed(2)}
+                    <br><small>En promedio, un símbolo aparece cada N posiciones. En una secuencia aleatoria, debe ser cercano al tamaño del alfabeto (${alphabetSize}).</small></p>
+                    <p><strong>Desv. Estándar del Paso:</strong> ${stdDevStepSize.toFixed(4)}
+                    <br><small>Mide si todos los símbolos 'juegan con las mismas reglas'. Un valor bajo significa que ningún símbolo es 'especial'.</small></p>
+                </details>
+                <hr>
+                <div class="conclusion">
+                    <h3>Conclusión del Analizador TIE</h3>
+                    <p><strong>Índice de Predictibilidad Estructural (IPE):</strong> 
+                    <br><strong style="font-size: 1.8em; color: ${predictabilityColor};">${predictabilityIndex.toFixed(2)}%</strong>
+                    <br><span style="color: ${predictabilityColor}; font-weight: bold;">Nivel: ${predictabilityLevel}</span></p>
+                    <small>Combina la estrechez del haz y la correlación. Un IPE alto indica que la estructura geométrica es ordenada y predecible, incluso si es estadísticamente aleatoria.</small>
+                </div>
+            `;
+        }
+
+        function renderChart(datasets, fileName, analysisType) {
+            const ctx = document.getElementById('trajectory-chart').getContext('2d');
+            const symbolTerm = analysisType === 'Nibbles' ? 'Nibble' : 'Símbolo';
+            
+            if (trajectoryChart) {
+                trajectoryChart.destroy();
+            }
+            trajectoryChart = new Chart(ctx, {
+                type: 'line',
+                data: { datasets: datasets },
+                options: {
+                    responsive: true, 
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: { 
+                            display: true, 
+                            text: `Trayectorias Estroboscópicas por ${analysisType} para "${fileName}"`, 
+                            font: { size: 18 }, 
+                            color: '#e0e0e0' 
+                        },
+                        legend: { 
+                            position: 'top', 
+                            labels: { 
+                                color: '#e0e0e0', 
+                                filter: item => !item.text.includes('Envoltura'),
+                                usePointStyle: true
+                            } 
+                        }
+                    },
+                    scales: {
+                        x: { 
+                            type: 'linear', 
+                            title: { 
+                                display: true, 
+                                text: `Número de Aparición del ${symbolTerm}`, 
+                                color: '#ccc' 
+                            }, 
+                            ticks: { color: '#ccc' },
+                            grid: { color: 'rgba(255,255,255,0.1)' }
+                        },
+                        y: { 
+                            title: { 
+                                display: true, 
+                                text: `Posición en el Flujo de Símbolos`, 
+                                color: '#ccc' 
+                            }, 
+                            ticks: { color: '#ccc' },
+                            grid: { color: 'rgba(255,255,255,0.1)' }
+                        }
+                    },
+                    animation: { duration: 0 }
+                }
+            });
+        }
+
+        function pearsonCorrelation(d1, d2) {
+            const minLength = Math.min(d1.length, d2.length);
+            if (minLength < 2) return 0;
+            let sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0;
+            for (let i = 0; i < minLength; i++) {
+                const x = d1[i].y; 
+                const y = d2[i].y;
+                sx += x; 
+                sy += y; 
+                sxx += x * x; 
+                syy += y * y; 
+                sxy += x * y;
+            }
+            const num = minLength * sxy - sx * sy;
+            const den = Math.sqrt((minLength * sxx - sx * sx) * (minLength * syy - sy * sy));
+            if (den === 0) return 0;
+            return num / den;
+        }
+
+        function calculateShannonEntropy(symbolStream) {
+            const totalSymbols = symbolStream.length;
+            if (totalSymbols === 0) return { entropy: 0 };
+            const counts = {};
+            for (const symbol of symbolStream) counts[symbol] = (counts[symbol] || 0) + 1;
+            let entropy = 0;
+            const log2 = Math.log(2);
+            for (const symbol in counts) {
+                const p = counts[symbol] / totalSymbols;
+                if (p > 0) entropy -= p * (Math.log(p) / log2);
+            }
+            return { entropy };
+        }
+
+        function generateColor(index, total) {
+            const hue = (index * 360 / total) % 360;
+            return `hsl(${hue}, 90%, 60%)`;
+        }
+    </script>
+</body>
+</html>
